@@ -1,0 +1,10 @@
+repos:
+  - repo: git@github.com:PyCQA/isort.git
+    rev: 5.12.0
+    hooks:
+      - id: isort
+
+  - repo: git@github.com:psf/black.git
+    rev: 24.3.0
+    hooks:
+      - id: black
