@@ -14,7 +14,7 @@ from json import JSONEncoder
 
 # ---------------------------------- datamodel.py -----------------------------------
 # --------------------- modified by Yi Zheng ----------------------------------------
-from typing import Dict, Lisi, List
+from typing import Dict, List
 
 import jsonpickle
 
@@ -250,9 +250,7 @@ class Logger:
     def compress_listings(self, listings: dict[Symbol, Listing]) -> list[list[Any]]:
         compressed = []
         for listing in listings.values():
-            compressed.append(
-                [listing["symbol"], listing["product"], listing["denomination"]]
-            )
+            compressed.append([listing.symbol, listing.product, listing.denomination])
 
         return compressed
 
@@ -330,6 +328,8 @@ class Status:
         "GIFT_BASKET": 60,
         "COCONUT": 300,
         "COCONUT_COUPON": 600,
+        "RAINFOREST_RESIN": 50,
+        "KELP": 50,
     }
 
     _state = None
@@ -1476,36 +1476,41 @@ class Trader:
     state_gift_basket = Status("GIFT_BASKET")
     state_coconut = Status("COCONUT")
     state_coconut_coupon = Status("COCONUT_COUPON")
+    state_rainforest_resin = Status("RAINFOREST_RESIN")
+    state_kelp = Status("KELP")
 
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
         Status.cls_update(state)
 
         result = {}
 
-        # round 1
-        result["AMETHYSTS"] = Trade.amethysts(self.state_amethysts)
-        result["STARFRUIT"] = Trade.starfruit(self.state_starfruit)
+        # # round 1
+        # result["AMETHYSTS"] = Trade.amethysts(self.state_amethysts)
+        # result["STARFRUIT"] = Trade.starfruit(self.state_starfruit)
 
-        # round 2
-        result["ORCHIDS"] = Trade.orchids(self.state_orchids)
-        conversions = Trade.convert(self.state_orchids)
+        # # round 2
+        # result["ORCHIDS"] = Trade.orchids(self.state_orchids)
+        # conversions = Trade.convert(self.state_orchids)
 
-        # round 3
-        result["GIFT_BASKET"] = Trade.gift_basket(
-            self.state_gift_basket,
-            self.state_chocolate,
-            self.state_strawberries,
-            self.state_roses,
-        )
-        result["ROSES"] = Trade.roses(self.state_roses)
+        # # round 3
+        # result["GIFT_BASKET"] = Trade.gift_basket(
+        #     self.state_gift_basket,
+        #     self.state_chocolate,
+        #     self.state_strawberries,
+        #     self.state_roses,
+        # )
+        # result["ROSES"] = Trade.roses(self.state_roses)
 
-        # round 4
-        coconut_result = Trade.coconut(
-            self.state_coconut, self.state_coconut_coupon, day=5
-        )
-        result["COCONUT_COUPON"] = coconut_result["COCONUT_COUPON"]
-        # result["COCONUT"] = coconut_result["COCONUT"]
+        # # round 4
+        # coconut_result = Trade.coconut(
+        #     self.state_coconut, self.state_coconut_coupon, day=5
+        # )
+        # result["COCONUT_COUPON"] = coconut_result["COCONUT_COUPON"]
+        # # result["COCONUT"] = coconut_result["COCONUT"]
+        result["RAINFOREST_RESIN"] = Trade.amethysts(self.state_rainforest_resin)
+        result["KELP"] = Trade.starfruit(self.state_kelp)
 
         traderData = "SAMPLE"
+        conversions = 1
         logger.flush(state, result, conversions, traderData)
         return result, conversions, traderData
