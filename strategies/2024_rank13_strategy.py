@@ -1080,6 +1080,67 @@ class Strategy:
         if sell_amount > 0:
             orders.append(Order(state.product, int(p_a), -int(sell_amount)))
         return orders
+    
+    def mm_glft_slope(
+        state: Status,
+        fair_price,
+        mu=0,
+        sigma=0.3959,
+        gamma=1e-9,
+        order_amount=20,
+        avg_slope=0,             # ✅ 新增参数：传入当前 slope
+        slope_thresh=0.02        # ✅ 新增参数：定义方向容忍度
+    ):
+
+        q = state.rt_position / order_amount
+
+        kappa_b = 1 / max((fair_price - state.best_bid) - 1, 1)
+        kappa_a = 1 / max((state.best_ask - fair_price) - 1, 1)
+
+        A_b = 0.25
+        A_a = 0.25
+
+        delta_b = 1 / gamma * math.log(1 + gamma / kappa_b) + (
+            -mu / (gamma * sigma**2) + (2 * q + 1) / 2
+        ) * math.sqrt(
+            (sigma**2 * gamma)
+            / (2 * kappa_b * A_b)
+            * (1 + gamma / kappa_b) ** (1 + kappa_b / gamma)
+        )
+
+        delta_a = 1 / gamma * math.log(1 + gamma / kappa_a) + (
+            mu / (gamma * sigma**2) - (2 * q - 1) / 2
+        ) * math.sqrt(
+            (sigma**2 * gamma)
+            / (2 * kappa_a * A_a)
+            * (1 + gamma / kappa_a) ** (1 + kappa_a / gamma)
+        )
+
+        p_b = round(fair_price - delta_b)
+        p_a = round(fair_price + delta_a)
+
+        p_b = min(p_b, fair_price)
+        p_b = min(p_b, state.best_bid + 1)
+        p_b = max(p_b, state.maxamt_bidprc + 1)
+
+        p_a = max(p_a, fair_price)
+        p_a = max(p_a, state.best_ask - 1)
+        p_a = min(p_a, state.maxamt_askprc - 1)
+
+        buy_amount = min(order_amount, state.possible_buy_amt)
+        sell_amount = min(order_amount, state.possible_sell_amt)
+
+        # ✅ 方向一致性控制
+        skip_buy = avg_slope < -slope_thresh and state.rt_position > 0
+        skip_sell = avg_slope > slope_thresh and state.rt_position < 0
+
+        orders = []
+        if buy_amount > 0 and not skip_buy:
+            orders.append(Order(state.product, int(p_b), int(buy_amount)))
+        if sell_amount > 0 and not skip_sell:
+            orders.append(Order(state.product, int(p_a), -int(sell_amount)))
+        return orders
+
 
     @staticmethod
     def mm_ou(
@@ -1468,32 +1529,54 @@ class Trade:
 
         return result
 
-    @staticmethod
+    staticmethod
     def squid_ink(state: Status) -> list[Order]:
         N = 15  # 回顾过去多少个时间步
         hist_mid = state.hist_mid_prc(N)
-    
-        if len(hist_mid) < N:
+
+        if len(hist_mid) < N or state.best_bid is None or state.best_ask is None:
             fair_price = state.vwap
+            x = np.arange(len(hist_mid))
+            slope, intercept = np.polyfit(x, hist_mid, 1)
+            Strategy.slope_history.append(slope)
+            avg_slope = np.mean(Strategy.slope_history)
+
         else:
             x = np.arange(N)
             slope, intercept = np.polyfit(x, hist_mid, 1)
-
             Strategy.slope_history.append(slope)
-
             avg_slope = np.mean(Strategy.slope_history)
-            bias = avg_slope 
-            fair_price = hist_mid[-1] + bias
-            fair_price = max(fair_price, state.best_bid - state.bid_ask_spread)
-            fair_price = min(fair_price, state.best_ask + state.bid_ask_spread)
 
+            bias = avg_slope * np.abs(avg_slope)
+
+            bid_price = state.best_bid
+            ask_price = state.best_ask
+            bid_vol = state.best_bid_amount or 1  
+            ask_vol = state.best_ask_amount or 1
+
+            ob_mid = (bid_price * ask_vol + ask_price * bid_vol) / (bid_vol + ask_vol)
+
+            trend_mid = hist_mid[-1] + bias
+            fair_price = 0.5 * trend_mid + 0.5 * ob_mid
+
+            padding = state.bid_ask_spread * 1.5
+            fair_price = max(fair_price, bid_price - padding)
+            fair_price = min(fair_price, ask_price + padding)
+
+        # --- 挂单执行 ---
         orders = []
         orders.extend(Strategy.arb(state=state, fair_price=fair_price))
         orders.extend(
-            Strategy.mm_glft(
-                state=state, fair_price=fair_price, gamma=1e-4, order_amount=30
+            Strategy.mm_glft_slope(
+                state=state,
+                fair_price=fair_price,
+                gamma=1e-4,
+                order_amount=30,
+                avg_slope=avg_slope,         
+                slope_thresh=0.02              
             )
         )
+
         return orders
 
 
