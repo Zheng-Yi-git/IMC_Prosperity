@@ -1563,7 +1563,7 @@ class Trade:
             fair_price = max(fair_price, bid_price - padding)
             fair_price = min(fair_price, ask_price + padding)
 
-        # --- 挂单执行 ---
+
         orders = []
         orders.extend(Strategy.arb(state=state, fair_price=fair_price))
         orders.extend(
@@ -1573,7 +1573,7 @@ class Trade:
                 gamma=1e-4,
                 order_amount=30,
                 avg_slope=avg_slope,         
-                slope_thresh=0.02              
+                slope_thresh=0.01              
             )
         )
 
