@@ -1,7 +1,7 @@
 import json
 import math
 from statistics import NormalDist
-
+from collections import deque
 # from datamodel import *
 from typing import Any, Dict, List, TypeAlias
 
@@ -978,6 +978,7 @@ class ExecutionProb:
 
 
 class Strategy:
+    slope_history = deque(maxlen=50) 
 
     @staticmethod
     def arb(state: Status, fair_price):
@@ -1368,7 +1369,8 @@ class Strategy:
 
 
 class Trade:
-
+    
+    
     @staticmethod
     def amethysts(state: Status) -> list[Order]:
 
@@ -1470,16 +1472,17 @@ class Trade:
     def squid_ink(state: Status) -> list[Order]:
         N = 15  # 回顾过去多少个时间步
         hist_mid = state.hist_mid_prc(N)
-
+    
         if len(hist_mid) < N:
             fair_price = state.vwap
         else:
-            # 线性回归计算斜率
             x = np.arange(N)
             slope, intercept = np.polyfit(x, hist_mid, 1)
 
-            # 趋势修正项
-            bias = slope * 1  # 趋势影响权重，可以调参
+            Strategy.slope_history.append(slope)
+
+            avg_slope = np.mean(Strategy.slope_history)
+            bias = avg_slope 
             fair_price = hist_mid[-1] + bias
             fair_price = max(fair_price, state.best_bid - state.bid_ask_spread)
             fair_price = min(fair_price, state.best_ask + state.bid_ask_spread)
