@@ -331,6 +331,7 @@ class Status:
         "COCONUT_COUPON": 600,
         "RAINFOREST_RESIN": 50,
         "KELP": 50,
+        "SQUID_INK": 50,
     }
 
     _state = None
@@ -1479,6 +1480,7 @@ class Trader:
     state_coconut_coupon = Status("COCONUT_COUPON")
     state_rainforest_resin = Status("RAINFOREST_RESIN")
     state_kelp = Status("KELP")
+    state_squid_ink = Status("SQUID_INK")  # swing but have price trend
 
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
         Status.cls_update(state)
@@ -1510,6 +1512,7 @@ class Trader:
         # # result["COCONUT"] = coconut_result["COCONUT"]
         result["RAINFOREST_RESIN"] = Trade.amethysts(self.state_rainforest_resin)
         result["KELP"] = Trade.starfruit(self.state_kelp)
+        result["SQUID_INK"] = Trade.starfruit(self.state_squid_ink)
 
         traderData = "SAMPLE"
         conversions = 1
