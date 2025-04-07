@@ -330,6 +330,7 @@ class Status:
         "COCONUT_COUPON": 600,
         "RAINFOREST_RESIN": 50,
         "KELP": 50,
+        "SQUID_INK" : 50,
     }
 
     _state = None
@@ -1477,6 +1478,7 @@ class Trader:
     state_coconut = Status("COCONUT")
     state_coconut_coupon = Status("COCONUT_COUPON")
     state_rainforest_resin = Status("RAINFOREST_RESIN")
+    state_squid_ink = Status("SQUID_INK")
     state_kelp = Status("KELP")
 
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
@@ -1507,8 +1509,14 @@ class Trader:
         # )
         # result["COCONUT_COUPON"] = coconut_result["COCONUT_COUPON"]
         # # result["COCONUT"] = coconut_result["COCONUT"]
-        result["RAINFOREST_RESIN"] = Trade.amethysts(self.state_rainforest_resin)
-        result["KELP"] = Trade.starfruit(self.state_kelp)
+        strategy_map = {
+            "RAINFOREST_RESIN": Trade.amethysts,
+            "KELP": Trade.starfruit,
+            "SQUID_INK":Trade.amethysts,  # 举个例子
+        }
+
+        for product, strategy_fn in strategy_map.items():
+            result[product] = strategy_fn(strategy_map[product])
 
         traderData = "SAMPLE"
         conversions = 1
