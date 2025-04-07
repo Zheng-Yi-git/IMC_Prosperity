@@ -1479,6 +1479,7 @@ class Trader:
     state_coconut = Status("COCONUT")
     state_coconut_coupon = Status("COCONUT_COUPON")
     state_rainforest_resin = Status("RAINFOREST_RESIN")
+    state_squid_ink = Status("SQUID_INK")
     state_kelp = Status("KELP")
     state_squid_ink = Status("SQUID_INK")  # swing but have price trend
 
