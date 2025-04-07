@@ -3,20 +3,21 @@ import math
 from statistics import NormalDist
 
 # from datamodel import *
-from typing import Any
+from typing import Any, Dict, List, TypeAlias
 
 import numpy as np
 
 INF = 1e9
 normalDist = NormalDist(0, 1)
+JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
 from json import JSONEncoder
 
+import jsonpickle
+
 # ---------------------------------- datamodel.py -----------------------------------
 # --------------------- modified by Yi Zheng ----------------------------------------
-from typing import Dict, List
 
-import jsonpickle
 
 Time = int
 Symbol = str
@@ -1371,13 +1372,13 @@ class Trade:
     @staticmethod
     def amethysts(state: Status) -> list[Order]:
 
-        current_price = state.maxamt_midprc
+        current_price = state.vwap
 
         orders = []
         orders.extend(Strategy.arb(state=state, fair_price=current_price))
         orders.extend(
             Strategy.mm_ou(
-                state=state, fair_price=current_price, gamma=0.1, order_amount=20
+                state=state, fair_price=current_price, gamma=1e-7, order_amount=40
             )
         )
 
@@ -1386,13 +1387,13 @@ class Trade:
     @staticmethod
     def starfruit(state: Status) -> list[Order]:
 
-        current_price = state.maxamt_midprc
+        current_price = state.vwap
 
         orders = []
         orders.extend(Strategy.arb(state=state, fair_price=current_price))
         orders.extend(
             Strategy.mm_glft(
-                state=state, fair_price=current_price, gamma=0.1, order_amount=20
+                state=state, fair_price=current_price, gamma=1e-4, order_amount=30
             )
         )
 
