@@ -1,7 +1,8 @@
 import json
 import math
-from statistics import NormalDist
 from collections import deque
+from statistics import NormalDist
+
 # from datamodel import *
 from typing import Any, Dict, List, TypeAlias
 
@@ -978,7 +979,7 @@ class ExecutionProb:
 
 
 class Strategy:
-    slope_history = deque(maxlen=50) 
+    slope_history = deque(maxlen=50)
 
     @staticmethod
     def arb(state: Status, fair_price):
@@ -1080,7 +1081,7 @@ class Strategy:
         if sell_amount > 0:
             orders.append(Order(state.product, int(p_a), -int(sell_amount)))
         return orders
-    
+
     def mm_glft_slope(
         state: Status,
         fair_price,
@@ -1088,8 +1089,8 @@ class Strategy:
         sigma=0.3959,
         gamma=1e-9,
         order_amount=20,
-        avg_slope=0,             # ✅ 新增参数：传入当前 slope
-        slope_thresh=0.02        # ✅ 新增参数：定义方向容忍度
+        avg_slope=0,  # ✅ 新增参数：传入当前 slope
+        slope_thresh=0.02,  # ✅ 新增参数：定义方向容忍度
     ):
 
         q = state.rt_position / order_amount
@@ -1140,7 +1141,6 @@ class Strategy:
         if sell_amount > 0 and not skip_sell:
             orders.append(Order(state.product, int(p_a), -int(sell_amount)))
         return orders
-
 
     @staticmethod
     def mm_ou(
@@ -1430,8 +1430,7 @@ class Strategy:
 
 
 class Trade:
-    
-    
+
     @staticmethod
     def amethysts(state: Status) -> list[Order]:
 
@@ -1530,39 +1529,44 @@ class Trade:
         return result
 
     staticmethod
+
     def squid_ink(state: Status) -> list[Order]:
         N = 15  # 回顾过去多少个时间步
         hist_mid = state.hist_mid_prc(N)
 
-        if len(hist_mid) < N or state.best_bid is None or state.best_ask is None:
-            fair_price = state.vwap
-            x = np.arange(len(hist_mid))
-            slope, intercept = np.polyfit(x, hist_mid, 1)
-            Strategy.slope_history.append(slope)
-            avg_slope = np.mean(Strategy.slope_history)
+        try:
+            if len(hist_mid) < N or state.best_bid is None or state.best_ask is None:
+                fair_price = state.vwap
+                x = np.arange(len(hist_mid))
+                slope, intercept = np.polyfit(x, hist_mid, 1)
+                Strategy.slope_history.append(slope)
+                avg_slope = np.mean(Strategy.slope_history)
 
-        else:
-            x = np.arange(N)
-            slope, intercept = np.polyfit(x, hist_mid, 1)
-            Strategy.slope_history.append(slope)
-            avg_slope = np.mean(Strategy.slope_history)
+            else:
+                x = np.arange(N)
+                slope, intercept = np.polyfit(x, hist_mid, 1)
+                Strategy.slope_history.append(slope)
+                avg_slope = np.mean(Strategy.slope_history)
 
-            bias = avg_slope * np.abs(avg_slope)
+                bias = avg_slope * np.abs(avg_slope)
 
-            bid_price = state.best_bid
-            ask_price = state.best_ask
-            bid_vol = state.best_bid_amount or 1  
-            ask_vol = state.best_ask_amount or 1
+                bid_price = state.best_bid
+                ask_price = state.best_ask
+                bid_vol = state.best_bid_amount or 1
+                ask_vol = state.best_ask_amount or 1
 
-            ob_mid = (bid_price * ask_vol + ask_price * bid_vol) / (bid_vol + ask_vol)
+                ob_mid = (bid_price * ask_vol + ask_price * bid_vol) / (
+                    bid_vol + ask_vol
+                )
 
-            trend_mid = hist_mid[-1] + bias
-            fair_price = 0.5 * trend_mid + 0.5 * ob_mid
+                trend_mid = hist_mid[-1] + bias
+                fair_price = 0.5 * trend_mid + 0.5 * ob_mid
 
-            padding = state.bid_ask_spread * 1.5
-            fair_price = max(fair_price, bid_price - padding)
-            fair_price = min(fair_price, ask_price + padding)
-
+                padding = state.bid_ask_spread * 1.5
+                fair_price = max(fair_price, bid_price - padding)
+                fair_price = min(fair_price, ask_price + padding)
+        except Exception as e:
+            return []
 
         orders = []
         orders.extend(Strategy.arb(state=state, fair_price=fair_price))
@@ -1572,8 +1576,8 @@ class Trade:
                 fair_price=fair_price,
                 gamma=1e-4,
                 order_amount=30,
-                avg_slope=avg_slope,         
-                slope_thresh=0.01              
+                avg_slope=avg_slope,
+                slope_thresh=0.01,
             )
         )
 
