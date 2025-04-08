@@ -4,13 +4,12 @@ from collections import deque
 from statistics import NormalDist
 
 # from datamodel import *
-from typing import Any, Dict, List, TypeAlias
+from typing import Any, Dict, List
 
 import numpy as np
 
 INF = 1e9
 normalDist = NormalDist(0, 1)
-JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
 from json import JSONEncoder
 
@@ -29,7 +28,6 @@ ObservationValue = int
 
 
 class Order:
-
     def __init__(self, symbol: Symbol, price: int, quantity: int) -> None:
         self.symbol = symbol
         self.price = price
@@ -47,14 +45,12 @@ class Order:
 
 
 class OrderDepth:
-
     def __init__(self):
         self.buy_orders: Dict[int, int] = {}
         self.sell_orders: Dict[int, int] = {}
 
 
 class ConversionObservation:
-
     def __init__(
         self,
         bidPrice: float,
@@ -75,7 +71,6 @@ class ConversionObservation:
 
 
 class Observation:
-
     def __init__(
         self,
         plainValueObservations: Dict[Product, ObservationValue],
@@ -95,7 +90,6 @@ class Observation:
 
 
 class Listing:
-
     def __init__(self, symbol: Symbol, product: Product, denomination: Product):
         self.symbol = symbol
         self.product = product
@@ -103,7 +97,6 @@ class Listing:
 
 
 class Trade:
-
     def __init__(
         self,
         symbol: Symbol,
@@ -156,13 +149,11 @@ class Trade:
 
 
 class ProsperityEncoder(JSONEncoder):
-
     def default(self, o):
         return o.__dict__
 
 
 class TradingState(object):
-
     def __init__(
         self,
         traderData: str,
@@ -234,6 +225,7 @@ class Logger:
                 ]
             )
         )
+        print("debugging")
 
         self.logs = ""
 
@@ -962,8 +954,22 @@ def cal_imvol(market_price, S, tau, r=0, K=10000, tol=1e-6, max_iter=100):
     return sigma
 
 
-class ExecutionProb:
+def cal_obi(bid_vol: float, ask_vol: float) -> float:
+    if bid_vol is None or ask_vol is None or (bid_vol + ask_vol == 0):
+        return 0.0
+    return (bid_vol - ask_vol) / (bid_vol + ask_vol)
 
+
+def calc_kelp_next_price(kelp_mid_price_history):
+    coef = [0.32744102, 0.2609162, 0.20492715, 0.20581442]
+    intercept = 1.8260964
+    nxt_price = intercept
+    for i, val in enumerate(kelp_mid_price_history):
+        nxt_price += val * coef[i]
+    return int(round(nxt_price))
+
+
+class ExecutionProb:
     @staticmethod
     def orchids(delta):
         if delta < -1:
@@ -1428,11 +1434,62 @@ class Strategy:
 
         return orders
 
+    @staticmethod
+    def market_edge_orders(product: Status, acc_bid: int, acc_ask: int) -> list[Order]:
+        orders = []
+        best_sell_pr = product.best_ask
+        best_buy_pr = product.best_bid
+        cur_pos = product.rt_position
+        pos_limit = product.position_limit
+
+        for ask, vol in sorted(product.asks):
+            # 判断是否要买入：当前价格比 acc_bid 更便宜，或者在平空头时接受 acc_bid+1 的 ask
+            if (ask <= acc_bid and cur_pos < pos_limit) or (
+                cur_pos < 0 and ask == acc_bid + 1
+            ):
+                buy_amt = min(-vol, pos_limit - cur_pos)
+                cur_pos += buy_amt
+                assert buy_amt >= 0
+                orders.append(Order(product.product, ask, buy_amt))
+
+        # 决定主动挂单的价格
+        undercut_buy = best_buy_pr + 1
+        undercut_sell = best_sell_pr - 1
+
+        bid_pr = min(undercut_buy, acc_bid)
+        sell_pr = max(undercut_sell, acc_ask)
+
+        # 挂买单：还有容量，挂最优买价（或抢价）
+        if cur_pos < pos_limit:
+            num = pos_limit - cur_pos
+            orders.append(Order(product.product, bid_pr, num))
+            cur_pos += num
+
+        # 重置仓位以处理卖单逻辑
+        cur_pos = product.rt_position
+
+        # 遍历买单 obuy，看看谁价格够高让我们砸他
+        for bid, vol in sorted(product.bids, reverse=True):
+            # 如果有人出高价买（>= acc_ask），我们就卖；或者想平多头，用 acc_ask - 1 也卖
+            if (bid >= acc_ask and cur_pos > -pos_limit) or (
+                cur_pos > 0 and bid + 1 == acc_ask
+            ):
+                sell_amt = max(-vol, -pos_limit - cur_pos)
+                cur_pos += sell_amt
+                assert sell_amt <= 0
+                orders.append(Order(product.product, bid, sell_amt))
+
+        # 再次检查能否主动挂卖单（抢在别人前面卖）
+        if cur_pos > -pos_limit:
+            num = -cur_pos - pos_limit
+            orders.append(Order(product.product, sell_pr, num))
+            cur_pos += num
+        return orders
+
 
 class Trade:
-
     @staticmethod
-    def amethysts(state: Status) -> list[Order]:
+    def resin(state: Status) -> list[Order]:
 
         current_price = state.vwap
 
@@ -1440,25 +1497,46 @@ class Trade:
         orders.extend(Strategy.arb(state=state, fair_price=current_price))
         orders.extend(
             Strategy.mm_ou(
-                state=state, fair_price=current_price, gamma=1e-7, order_amount=40
+                state=state, fair_price=current_price, gamma=1e-7, order_amount=50
             )
         )
 
         return orders
 
     @staticmethod
-    def starfruit(state: Status) -> list[Order]:
-
-        current_price = state.vwap
-
+    def kelp_lr_mm(
+        state: Status, kelp_mid_price_history: deque, kelp_pred_window: int
+    ) -> list[Order]:
+        if len(kelp_mid_price_history) == kelp_pred_window:
+            kelp_mid_price_history.popleft()
+        kelp_mid_price_history.append(state.hist_mid_prc(1)[0])
+        if len(kelp_mid_price_history) < kelp_pred_window:
+            return []
+        pred_fair_price = calc_kelp_next_price(kelp_mid_price_history)
+        print("pred_fair_price", pred_fair_price)
         orders = []
-        orders.extend(Strategy.arb(state=state, fair_price=current_price))
+        orders.extend(Strategy.arb(state=state, fair_price=pred_fair_price))
         orders.extend(
             Strategy.mm_glft(
-                state=state, fair_price=current_price, gamma=1e-4, order_amount=30
+                state=state, fair_price=pred_fair_price, gamma=1e-5, order_amount=50
             )
         )
+        return orders
 
+    @staticmethod
+    def kelp_lr_edge(
+        state: Status, kelp_mid_price_history: deque, kelp_pred_window: int
+    ) -> list[Order]:
+        if len(kelp_mid_price_history) == kelp_pred_window:
+            kelp_mid_price_history.popleft()
+        kelp_mid_price_history.append(state.hist_mid_prc(1)[0])
+        lb, ub = -1e9, 1e9
+        if len(kelp_mid_price_history) == kelp_pred_window:
+            next_kelp_price = calc_kelp_next_price(kelp_mid_price_history)
+            lb, ub = next_kelp_price - 1, next_kelp_price + 1
+        else:
+            return []
+        orders = Strategy.market_edge_orders(state, lb, ub)
         return orders
 
     @staticmethod
@@ -1528,8 +1606,7 @@ class Trade:
 
         return result
 
-    staticmethod
-
+    @staticmethod
     def squid_ink(state: Status) -> list[Order]:
         N = 15  # 回顾过去多少个时间步
         hist_mid = state.hist_mid_prc(N)
@@ -1600,6 +1677,9 @@ class Trader:
     state_kelp = Status("KELP")
     state_squid_ink = Status("SQUID_INK")  # swing but have price trend
 
+    kelp_pred_window = 4
+    kelp_mid_price_history = deque(maxlen=kelp_pred_window)
+
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
         Status.cls_update(state)
 
@@ -1628,8 +1708,13 @@ class Trader:
         # )
         # result["COCONUT_COUPON"] = coconut_result["COCONUT_COUPON"]
         # # result["COCONUT"] = coconut_result["COCONUT"]
-        result["RAINFOREST_RESIN"] = Trade.amethysts(self.state_rainforest_resin)
-        result["KELP"] = Trade.starfruit(self.state_kelp)
+        result["RAINFOREST_RESIN"] = Trade.resin(self.state_rainforest_resin)
+        result["KELP"] = Trade.kelp_lr_edge(
+            self.state_kelp, self.kelp_mid_price_history, self.kelp_pred_window
+        )
+        # result["KELP"] = Trade.kelp_lr_mm(
+        #     self.state_kelp, self.kelp_mid_price_history, self.kelp_pred_window
+        # )
         result["SQUID_INK"] = Trade.squid_ink(self.state_squid_ink)
 
         traderData = "SAMPLE"
