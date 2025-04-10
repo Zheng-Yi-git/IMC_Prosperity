@@ -985,7 +985,8 @@ class ExecutionProb:
 
 
 class Strategy:
-    slope_history = deque(maxlen=50)
+    # slope_history = deque(maxlen=50)
+    slope_history = []
 
     @staticmethod
     def arb(state: Status, fair_price):
@@ -1606,57 +1607,118 @@ class Trade:
 
         return result
 
+    # @staticmethod
+    # def squid_ink(state: Status) -> list[Order]:
+    #     # === 策略参数 ===
+    #     window = 5               # 回顾窗口
+    #     z_entry = 1.0            # 偏离建仓阈值
+    #     z_clear = 0.0            # 回归平仓阈值
+    #     max_order = 40           # 最大单次下单量
+    #     max_position_ratio = 0.9 # 仓位限制
+
+    #     # === 获取历史 mid price，计算均值与偏离 ===
+    #     hist_mid = state.hist_mid_prc(window)
+    #     if len(hist_mid) < window:
+    #         return []
+
+    #     current_mid = state.mid
+    #     ma = np.mean(hist_mid)
+    #     z_score = current_mid - ma  # 简化成绝对价差
+
+    #     position = state.rt_position
+    #     position_limit = state.position_limit
+    #     position_ratio = position / position_limit
+
+    #     orders = []
+
+    #     # === 建仓逻辑 ===
+    #     if z_score >= z_entry and position_ratio > -max_position_ratio:
+    #         # 价格偏高 → 做空（卖出）
+    #         intensity = min((z_score - z_entry) / z_entry, 1.0)
+    #         qty = int(max_order * intensity)
+    #         qty = min(qty, state.possible_sell_amt)
+    #         if qty > 0:
+    #             price = state.best_bid  # 可以替换为更保守价：state.best_bid - 1
+    #             orders.append(Order(state.product, price, qty))
+
+    #     elif z_score <= -z_entry and position_ratio < max_position_ratio:
+    #         # 价格偏低 → 做多（买入）
+    #         intensity = min((-z_score - z_entry) / z_entry, 1.0)
+    #         qty = int(max_order * intensity)
+    #         qty = min(qty, state.possible_buy_amt)
+    #         if qty > 0:
+    #             price = state.best_ask  # 或 state.best_ask + 1
+    #             orders.append(Order(state.product, price, -qty))
+
+    #     # === 平仓逻辑 ===
+    #     elif abs(z_score) <= z_clear:
+    #         ratio = min(abs(position / position_limit) * 2, 1.0)
+    #         qty = int(max_order * ratio)
+
+    #         if position > 0 and state.possible_sell_amt > 0:
+    #             qty = min(qty, state.possible_sell_amt)
+    #             price = state.best_bid  # 或更保守：state.best_bid - 1
+    #             orders.append(Order(state.product, price, qty))
+
+    #         elif position < 0 and state.possible_buy_amt > 0:
+    #             qty = min(qty, state.possible_buy_amt)
+    #             price = state.best_ask  # 或更保守：state.best_ask + 1
+    #             orders.append(Order(state.product, price, -qty))
+
+    #     return orders
     @staticmethod
     def squid_ink(state: Status) -> list[Order]:
-        N = 15  # 回顾过去多少个时间步
-        hist_mid = state.hist_mid_prc(N)
-
-        try:
-            if len(hist_mid) < N or state.best_bid is None or state.best_ask is None:
-                fair_price = state.vwap
-                x = np.arange(len(hist_mid))
-                slope, intercept = np.polyfit(x, hist_mid, 1)
-                Strategy.slope_history.append(slope)
-                avg_slope = np.mean(Strategy.slope_history)
-
-            else:
-                x = np.arange(N)
-                slope, intercept = np.polyfit(x, hist_mid, 1)
-                Strategy.slope_history.append(slope)
-                avg_slope = np.mean(Strategy.slope_history)
-
-                bias = avg_slope * np.abs(avg_slope)
-
-                bid_price = state.best_bid
-                ask_price = state.best_ask
-                bid_vol = state.best_bid_amount or 1
-                ask_vol = state.best_ask_amount or 1
-
-                ob_mid = (bid_price * ask_vol + ask_price * bid_vol) / (
-                    bid_vol + ask_vol
-                )
-
-                trend_mid = hist_mid[-1] + bias
-                fair_price = 0.5 * trend_mid + 0.5 * ob_mid
-
-                padding = state.bid_ask_spread * 1.5
-                fair_price = max(fair_price, bid_price - padding)
-                fair_price = min(fair_price, ask_price + padding)
-        except Exception as e:
+        N = 5               # EMA 和 Std 的窗口
+        entry_threshold = 0.4
+        clear_threshold =0.1
+        max_order = 100
+        max_position_ratio = 1  # 最多持仓 80%
+        
+        orders = []
+        hist_mid = state.hist_mid_prc(N + 1)
+        if len(hist_mid) < N + 1:
             return []
 
-        orders = []
-        orders.extend(Strategy.arb(state=state, fair_price=fair_price))
-        orders.extend(
-            Strategy.mm_glft_slope(
-                state=state,
-                fair_price=fair_price,
-                gamma=1e-4,
-                order_amount=30,
-                avg_slope=avg_slope,
-                slope_thresh=0.01,
-            )
-        )
+        # === 1. 计算 mid_price, ema 和 std ===
+        current_mid = hist_mid[-1]
+        alpha = 2 / (N + 1)
+        ema = hist_mid[0]
+        for price in hist_mid[1:]:
+            ema = alpha * price + (1 - alpha) * ema
+        std = np.std(hist_mid[-N:]) + 1e-4
+
+        # === 2. 构造 signal ===
+        signal = (current_mid - ema) / std
+
+        position = state.rt_position
+        position_limit = state.position_limit
+        position_ratio = position / position_limit
+
+        # === 3. 开仓 ===
+        if signal > entry_threshold and position_ratio < max_position_ratio:
+            intensity = max((abs(signal) - entry_threshold) / entry_threshold, 1.0)
+            qty = int(max_order * intensity)
+            qty = min(max_order, state.possible_buy_amt)
+            if qty > 0:
+                orders.append(Order(state.product, state.best_ask, -qty))  # 买入开多
+
+        elif signal < -entry_threshold and position_ratio > -max_position_ratio:
+            intensity = max((abs(signal) - entry_threshold) / entry_threshold, 1.0)
+            qty = int(max_order * intensity)
+            qty = min(max_order, state.possible_sell_amt)
+            if qty > 0:
+                orders.append(Order(state.product, state.best_bid, +qty))  # 卖出开空
+
+        # === 4. 平仓 ===
+        elif abs(signal) < clear_threshold:
+            if position > 0:
+                qty = min(max_order, state.possible_sell_amt)
+                price = min(state.best_bid + 1, state.best_ask - 1)
+                orders.append(Order(state.product, price, -qty))  # 平多
+            elif position < 0:
+                qty = min(max_order, state.possible_buy_amt)
+                price = max(state.best_ask - 1, state.best_bid + 1)
+                orders.append(Order(state.product, price, qty))   # 平空
 
         return orders
 
@@ -1709,7 +1771,7 @@ class Trader:
         # result["COCONUT_COUPON"] = coconut_result["COCONUT_COUPON"]
         # # result["COCONUT"] = coconut_result["COCONUT"]
         result["RAINFOREST_RESIN"] = Trade.resin(self.state_rainforest_resin)
-        result["KELP"] = Trade.kelp_lr_edge(
+        result["KELP"] = Trade.kelp_lr_mm(
             self.state_kelp, self.kelp_mid_price_history, self.kelp_pred_window
         )
         # result["KELP"] = Trade.kelp_lr_mm(
