@@ -3,3 +3,5 @@
 *log
 IdToken.txt
 .DS_Store
+strategies/__pycache__/
+manual/
