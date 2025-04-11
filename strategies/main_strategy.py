@@ -1030,8 +1030,7 @@ class ExecutionProb:
 
 
 class Strategy:
-    # slope_history = deque(maxlen=50)
-    slope_history = []
+    slope_history = deque(maxlen=50)
 
     @staticmethod
     def arb(state: Status, fair_price):
@@ -2138,46 +2137,18 @@ class Trade:
         except Exception as e:
             return []
 
-        # === 1. 计算 mid_price, ema 和 std ===
-        current_mid = hist_mid[-1]
-        alpha = 2 / (N + 1)
-        ema = hist_mid[0]
-        for price in hist_mid[1:]:
-            ema = alpha * price + (1 - alpha) * ema
-        std = np.std(hist_mid[-N:]) + 1e-4
-
-        # === 2. 构造 signal ===
-        signal = (current_mid - ema) / std
-
-        position = state.rt_position
-        position_limit = state.position_limit
-        position_ratio = position / position_limit
-
-        # === 3. 开仓 ===
-        if signal > entry_threshold and position_ratio < max_position_ratio:
-            intensity = max((abs(signal) - entry_threshold) / entry_threshold, 1.0)
-            qty = int(max_order * intensity)
-            qty = min(max_order, state.possible_buy_amt)
-            if qty > 0:
-                orders.append(Order(state.product, state.best_ask, -qty))  # 买入开多
-
-        elif signal < -entry_threshold and position_ratio > -max_position_ratio:
-            intensity = max((abs(signal) - entry_threshold) / entry_threshold, 1.0)
-            qty = int(max_order * intensity)
-            qty = min(max_order, state.possible_sell_amt)
-            if qty > 0:
-                orders.append(Order(state.product, state.best_bid, +qty))  # 卖出开空
-
-        # === 4. 平仓 ===
-        elif abs(signal) < clear_threshold:
-            if position > 0:
-                qty = min(max_order, state.possible_sell_amt)
-                price = min(state.best_bid + 1, state.best_ask - 1)
-                orders.append(Order(state.product, price, -qty))  # 平多
-            elif position < 0:
-                qty = min(max_order, state.possible_buy_amt)
-                price = max(state.best_ask - 1, state.best_bid + 1)
-                orders.append(Order(state.product, price, qty))  # 平空
+        orders = []
+        orders.extend(Strategy.arb(state=state, fair_price=fair_price))
+        orders.extend(
+            Strategy.mm_glft_slope(
+                state=state,
+                fair_price=fair_price,
+                gamma=1e-4,
+                order_amount=30,
+                avg_slope=avg_slope,
+                slope_thresh=0.01,
+            )
+        )
 
         return orders
 
