@@ -958,6 +958,13 @@ def ewma(ls, alpha=0.6):
     return final_res
 
 
+def calc_swmid(product: Status) -> float:
+    return (
+        product.best_bid * product.best_ask_amount
+        + product.best_ask * product.best_bid_amount
+    ) / (product.best_ask_amount + product.best_bid_amount)
+
+
 class SignalType(Enum):
     BUY = 1
     SELL = 2
@@ -1407,9 +1414,12 @@ class Strategy:
         croissant: Status,
         jam: Status,
         djembe: Status,
+        real_minus_etf_vwap: list,
         theta=380,
         open_threshold=30,
         close_threshold=10,
+        window=30,
+        z_score_threshold=1,
     ):
         """
         arb for picnic_basket1
@@ -1423,8 +1433,22 @@ class Strategy:
         cur_arb_pos = basket.rt_position
         orders = []
 
-        if cur_arb_pos > 0 and buy_real_price_diff < close_threshold:
-            # open position
+        cur_real_minus_etf_vwap_diff = (
+            calc_swmid(basket)
+            - 6 * calc_swmid(croissant)
+            - 3 * calc_swmid(jam)
+            - calc_swmid(djembe)
+        )
+        real_minus_etf_vwap.append(cur_real_minus_etf_vwap_diff)
+        if len(real_minus_etf_vwap) > window:
+            real_minus_etf_vwap.pop(0)
+        diff_std = np.std(real_minus_etf_vwap)
+        diff_std = 80  # based on edgar's historical data
+        # maybe add diff_std based on historical data since can be skewed
+        z_score = cur_real_minus_etf_vwap_diff / (diff_std + 1e-8)
+
+        if cur_arb_pos > 0 and cur_real_minus_etf_vwap_diff > -close_threshold:
+            # close long position
             possible_sell_amt = min(
                 basket.best_bid_amount,
                 croissant.best_ask_amount // 6,
@@ -1466,7 +1490,7 @@ class Strategy:
             )
             jam.rt_position_update(jam.rt_position + int(possible_sell_amt * 3))
             djembe.rt_position_update(djembe.rt_position + int(possible_sell_amt))
-        elif cur_arb_pos < 0 and sell_real_price_diff < close_threshold:
+        elif cur_arb_pos < 0 and cur_real_minus_etf_vwap_diff < close_threshold:
             possible_buy_amt = min(
                 basket.best_ask_amount,
                 croissant.best_bid_amount // 6,
@@ -1509,7 +1533,7 @@ class Strategy:
             jam.rt_position_update(jam.rt_position - int(possible_buy_amt * 3))
             djembe.rt_position_update(djembe.rt_position - int(possible_buy_amt))
 
-        if buy_real_price_diff > open_threshold:
+        if z_score < -z_score_threshold:
             possible_buy_amt = min(
                 basket.best_ask_amount,
                 croissant.best_bid_amount // 6,
@@ -1548,7 +1572,7 @@ class Strategy:
                     -int(possible_buy_amt),
                 )
             )
-        elif sell_real_price_diff > open_threshold:
+        elif z_score > z_score_threshold:
             possible_sell_amt = min(
                 basket.best_bid_amount,
                 croissant.best_ask_amount // 6,
@@ -2083,22 +2107,6 @@ class Trade:
         return orders
 
     @staticmethod
-    def picnic_basket1(basket: Status, croissant: Status, jam: Status, djembe: Status):
-        orders = []
-        orders.extend(
-            Strategy.index_arb1(
-                basket,
-                croissant,
-                jam,
-                djembe,
-                open_threshold=100,
-                close_threshold=20,
-                theta=0,
-            )
-        )
-        return orders
-
-    @staticmethod
     def squid_ink_polyfit(state: Status) -> list[Order]:
         N = 20  # lookback window
         hist_mid = state.hist_mid_prc(N)
@@ -2320,6 +2328,31 @@ class Trade:
 
         return orders
 
+    @staticmethod
+    def picnic_basket1(
+        basket: Status,
+        croissant: Status,
+        jam: Status,
+        djembe: Status,
+        real_minus_etf_vwap: list,
+    ) -> list[Order]:
+        orders = []
+        orders.extend(
+            Strategy.index_arb1(
+                basket,
+                croissant,
+                jam,
+                djembe,
+                open_threshold=100,
+                close_threshold=0,
+                theta=0,
+                window=45,
+                z_score_threshold=1,
+                real_minus_etf_vwap=real_minus_etf_vwap,
+            )
+        )
+        return orders
+
 
 class Trader:
     state_rainforest_resin = Status("RAINFOREST_RESIN")
@@ -2333,6 +2366,7 @@ class Trader:
 
     KELP_prices = []
     KELP_vwap = []
+    PB1_real_minus_etf_vwap = []
 
     def run(self, state: TradingState) -> tuple[dict[Symbol, list[Order]], int, str]:
         Status.cls_update(state)
@@ -2348,6 +2382,7 @@ class Trader:
             self.state_croissants,
             self.state_jams,
             self.state_djembes,
+            self.PB1_real_minus_etf_vwap,
         )
         result["PICNIC_BASKET2"] = []
         result["CROISSANTS"] = []
